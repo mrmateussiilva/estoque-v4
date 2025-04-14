@@ -1,133 +1,199 @@
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Depends
 from fastapi.middleware.cors import CORSMiddleware
-from db.db import init_db,get_db
-from model.base import Order,Product,StockEntry,Supplier,ProductTinta
+from pydantic import BaseModel
+from typing import Optional
+from sqlalchemy import create_engine, Column, Integer, String, Float
+from sqlalchemy.ext.declarative import declarative_base
+from sqlalchemy.orm import sessionmaker, Session
+import uvicorn
 
+# Database setup
+SQLALCHEMY_DATABASE_URL = "sqlite:///./estoque.db"
+engine = create_engine(SQLALCHEMY_DATABASE_URL, connect_args={"check_same_thread": False})
+SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
+Base = declarative_base()
 
-app = FastAPI()
+# FastAPI app
+app = FastAPI(title="Estoque API")
 
-# Configuração de CORS para permitir o frontend
+# CORS middleware
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=["*"],  # Adjust for production (e.g., your frontend URL)
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
+# Database models
+class TintaDB(Base):
+    __tablename__ = "tintas"
+    id = Column(Integer, primary_key=True, index=True)
+    color = Column(String, index=True)
+    type = Column(String)
+    productQty = Column(Integer)
+    productQtyLitros = Column(Float)
+    qtyMin = Column(Float, nullable=True)
 
+class PapelDB(Base):
+    __tablename__ = "papeis"
+    id = Column(Integer, primary_key=True, index=True)
+    type = Column(String, index=True)
+    qtyUnit = Column(Integer)
+    qtyMetros = Column(Integer)
+    qtyMin = Column(Float, nullable=True)
 
+class TecidoDB(Base):
+    __tablename__ = "tecidos"
+    id = Column(Integer, primary_key=True, index=True)
+    type = Column(String, index=True)
+    qtyMetros = Column(Float)
+    width = Column(Float)
+    qtyMin = Column(Float, nullable=True)
 
+# Create tables
+Base.metadata.create_all(bind=engine)
 
-@app.get("/products")
-async def get_products():
-    conn = get_db()
-    c = conn.cursor()
-    c.execute("SELECT * FROM products")
-    products = [dict(row) for row in c.fetchall()]
-    conn.close()
-    return products
+# Pydantic models for validation
+class TintaCreate(BaseModel):
+    color: str
+    type: str
+    productQty: int
+    productQtyLitros: float
+    qtyMin: Optional[float] = 0
 
-@app.post("/products")
-async def create_product(product: Product):
-    print(product)
-    # conn = get_db()
-    # c = conn.cursor()
-    return {"message":"aguardando"}
-    c.execute("INSERT INTO products (name, qty, price, category) VALUES (?, ?, ?, ?)",
-              (product.name, product.qty, product.price, product.category))
-    conn.commit()
-    conn.close()
-    return {"message": "Produto criado"}
+class PapelCreate(BaseModel):
+    type: str
+    qtyUnit: int
+    qtyMetros: int
+    qtyMin: Optional[float] = 0
 
-@app.post("/products-tinta")
-async def create_product_tinta(product: ProductTinta):
-    conn = get_db()
-    c = conn.cursor()
-    c.execute("""
-        INSERT INTO products_tinta (color, type, productQty, productQtyLitros)
-        VALUES (?, ?, ?, ?)
-    """, (
-        product.cor,     
-        product.type,
-        product.qty_unit,
-        product.qty_litros
-    ))
-    conn.commit()
-    conn.close()
-    return {"message": "Produto de tinta criado com sucesso"}
+class TecidoCreate(BaseModel):
+    type: str
+    qtyMetros: float
+    width: float
+    qtyMin: Optional[float] = 0
 
-@app.delete("/products/{id}")
-async def delete_product(id: int):
-    conn = get_db()
-    c = conn.cursor()
-    c.execute("DELETE FROM products WHERE id = ?", (id,))
-    conn.commit()
-    conn.close()
-    return {"message": "Produto removido"}
+class TintaResponse(TintaCreate):
+    id: int
+    class Config:
+        orm_mode = True
 
-# Rotas para entrada/saída de estoque
-@app.post("/stock/entry")
-async def stock_entry(entry: StockEntry):
-    conn = get_db()
-    c = conn.cursor()
-    c.execute("UPDATE products SET qty = qty + ? WHERE id = ?", (entry.qty, entry.product_id))
-    conn.commit()
-    conn.close()
-    return {"message": "Entrada registrada"}
+class PapelResponse(PapelCreate):
+    id: int
+    class Config:
+        orm_mode = True
 
-@app.post("/stock/exit")
-async def stock_exit(entry: StockEntry):
-    conn = get_db()
-    c = conn.cursor()
-    c.execute("SELECT qty FROM products WHERE id = ?", (entry.product_id,))
-    qty = c.fetchone()["qty"]
-    if qty < entry.qty:
-        raise HTTPException(status_code=400, detail="Quantidade insuficiente")
-    c.execute("UPDATE products SET qty = qty - ? WHERE id = ?", (entry.qty, entry.product_id))
-    conn.commit()
-    conn.close()
-    return {"message": "Saída registrada"}
+class TecidoResponse(TecidoCreate):
+    id: int
+    class Config:
+        orm_mode = True
 
-# Rotas para fornecedores
-@app.get("/suppliers")
-async def get_suppliers():
-    conn = get_db()
-    c = conn.cursor()
-    c.execute("SELECT * FROM suppliers")
-    suppliers = [dict(row) for row in c.fetchall()]
-    conn.close()
-    return suppliers
+# Dependency for database session
+def get_db():
+    db = SessionLocal()
+    try:
+        yield db
+    finally:
+        db.close()
 
-@app.post("/suppliers")
-async def create_supplier(supplier: Supplier):
-    conn = get_db()
-    c = conn.cursor()
-    c.execute("INSERT INTO suppliers (name, contact) VALUES (?, ?)", (supplier.name, supplier.contact))
-    conn.commit()
-    conn.close()
-    return {"message": "Fornecedor criado"}
+# Tinta endpoints
+@app.post("/products-tinta", response_model=TintaResponse, status_code=201)
+async def create_tinta(tinta: TintaCreate, db: Session = Depends(get_db)):
+    # Validate inputs
+    if not tinta.color.strip():
+        raise HTTPException(status_code=400, detail="Color is required")
+    if not tinta.type.strip():
+        raise HTTPException(status_code=400, detail="Type is required")
+    if tinta.productQty <= 0:
+        raise HTTPException(status_code=400, detail="productQty must be positive")
+    if tinta.productQtyLitros <= 0:
+        raise HTTPException(status_code=400, detail="productQtyLitros must be positive")
+    if tinta.qtyMin < 0:
+        raise HTTPException(status_code=400, detail="qtyMin cannot be negative")
 
-# Rotas para pedidos
-@app.post("/orders")
-async def create_order(order: Order):
-    conn = get_db()
-    c = conn.cursor()
-    c.execute("INSERT INTO orders (supplier_id, product_id, qty) VALUES (?, ?, ?)",
-              (order.supplier_id, order.product_id, order.qty))
-    c.execute("SELECT name, price FROM products WHERE id = ?", (order.product_id,))
-    product = dict(c.fetchone())
-    c.execute("SELECT name FROM suppliers WHERE id = ?", (order.supplier_id,))
-    supplier = dict(c.fetchone())
-    conn.commit()
-    conn.close()
-    return {
-        "supplier_name": supplier["name"],
-        "product_name": product["name"],
-        "total": product["price"] * order.qty
-    }
+    db_tinta = TintaDB(**tinta.dict())
+    db.add(db_tinta)
+    db.commit()
+    db.refresh(db_tinta)
+    return db_tinta
+
+@app.get("/products-tinta", response_model=list[TintaResponse])
+async def get_tintas(db: Session = Depends(get_db)):
+    return db.query(TintaDB).all()
+
+@app.delete("/products-tinta/{id}", status_code=204)
+async def delete_tinta(id: int, db: Session = Depends(get_db)):
+    tinta = db.query(TintaDB).filter(TintaDB.id == id).first()
+    if not tinta:
+        raise HTTPException(status_code=404, detail="Tinta not found")
+    db.delete(tinta)
+    db.commit()
+    return None
+
+# Papel endpoints
+@app.post("/products-papel", response_model=PapelResponse, status_code=201)
+async def create_papel(papel: PapelCreate, db: Session = Depends(get_db)):
+    # Validate inputs
+    if not papel.type.strip():
+        raise HTTPException(status_code=400, detail="Type is required")
+    if papel.qtyUnit <= 0:
+        raise HTTPException(status_code=400, detail="qtyUnit must be positive")
+    if papel.qtyMetros <= 0:
+        raise HTTPException(status_code=400, detail="qtyMetros must be positive")
+    if papel.qtyMin < 0:
+        raise HTTPException(status_code=400, detail="qtyMin cannot be negative")
+
+    db_papel = PapelDB(**papel.dict())
+    db.add(db_papel)
+    db.commit()
+    db.refresh(db_papel)
+    return db_papel
+
+@app.get("/products-papel", response_model=list[PapelResponse])
+async def get_papeis(db: Session = Depends(get_db)):
+    return db.query(PapelDB).all()
+
+@app.delete("/products-papel/{id}", status_code=204)
+async def delete_papel(id: int, db: Session = Depends(get_db)):
+    papel = db.query(PapelDB).filter(PapelDB.id == id).first()
+    if not papel:
+        raise HTTPException(status_code=404, detail="Papel not found")
+    db.delete(papel)
+    db.commit()
+    return None
+
+# Tecido endpoints
+@app.post("/products-tecido", response_model=TecidoResponse, status_code=201)
+async def create_tecido(tecido: TecidoCreate, db: Session = Depends(get_db)):
+    # Validate inputs
+    if not tecido.type.strip():
+        raise HTTPException(status_code=400, detail="Type is required")
+    if tecido.qtyMetros <= 0:
+        raise HTTPException(status_code=400, detail="qtyMetros must be positive")
+    if tecido.width <= 0:
+        raise HTTPException(status_code=400, detail="width must be positive")
+    if tecido.qtyMin < 0:
+        raise HTTPException(status_code=400, detail="qtyMin cannot be negative")
+
+    db_tecido = TecidoDB(**tecido.dict())
+    db.add(db_tecido)
+    db.commit()
+    db.refresh(db_tecido)
+    return db_tecido
+
+@app.get("/products-tecido", response_model=list[TecidoResponse])
+async def get_tecidos(db: Session = Depends(get_db)):
+    return db.query(TecidoDB).all()
+
+@app.delete("/products-tecido/{id}", status_code=204)
+async def delete_tecido(id: int, db: Session = Depends(get_db)):
+    tecido = db.query(TecidoDB).filter(TecidoDB.id == id).first()
+    if not tecido:
+        raise HTTPException(status_code=404, detail="Tecido not found")
+    db.delete(tecido)
+    db.commit()
+    return None
 
 if __name__ == "__main__":
-    import uvicorn
-    init_db()
     uvicorn.run(app, host="0.0.0.0", port=8000)
