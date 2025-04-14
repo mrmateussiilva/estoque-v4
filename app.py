@@ -1,7 +1,7 @@
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from db.db import init_db,get_db
-from model.base import Order,Product,StockEntry,Supplier
+from model.base import Order,Product,StockEntry,Supplier,ProductTinta
 
 
 app = FastAPI()
@@ -15,10 +15,10 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Modelos Pydantic
 
 
-# Rotas para produtos
+
+
 @app.get("/products")
 async def get_products():
     conn = get_db()
@@ -30,13 +30,32 @@ async def get_products():
 
 @app.post("/products")
 async def create_product(product: Product):
-    conn = get_db()
-    c = conn.cursor()
+    print(product)
+    # conn = get_db()
+    # c = conn.cursor()
+    return {"message":"aguardando"}
     c.execute("INSERT INTO products (name, qty, price, category) VALUES (?, ?, ?, ?)",
               (product.name, product.qty, product.price, product.category))
     conn.commit()
     conn.close()
     return {"message": "Produto criado"}
+
+@app.post("/products-tinta")
+async def create_product_tinta(product: ProductTinta):
+    conn = get_db()
+    c = conn.cursor()
+    c.execute("""
+        INSERT INTO products_tinta (color, type, productQty, productQtyLitros)
+        VALUES (?, ?, ?, ?)
+    """, (
+        product.cor,     
+        product.type,
+        product.qty_unit,
+        product.qty_litros
+    ))
+    conn.commit()
+    conn.close()
+    return {"message": "Produto de tinta criado com sucesso"}
 
 @app.delete("/products/{id}")
 async def delete_product(id: int):
