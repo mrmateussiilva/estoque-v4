@@ -27,6 +27,20 @@ def init_db():
         qty INTEGER,
         FOREIGN KEY(supplier_id) REFERENCES suppliers(id),
         FOREIGN KEY(product_id) REFERENCES products(id))''')
+    
+    c.execute("""
+    CREATE TABLE IF NOT EXISTS products_tinta (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        color TEXT NOT NULL,
+        type TEXT NOT NULL,
+        productQty INTEGER NOT NULL,
+        productQtyLitros INTEGER NOT NULL
+    )
+    """)
+
+        
+        
+        
     conn.commit()
     conn.close()
 
