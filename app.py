@@ -21,6 +21,8 @@ Base = declarative_base()
 # FastAPI app
 app = FastAPI(title="Estoque API")
 
+
+
 # CORS middleware
 app.add_middleware(
     CORSMiddleware,
