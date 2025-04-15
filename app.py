@@ -3,13 +3,18 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from typing import Optional
 from sqlalchemy import create_engine, Column, Integer, String, Float
-from sqlalchemy.ext.declarative import declarative_base
+from sqlalchemy.orm import declarative_base
+
 from sqlalchemy.orm import sessionmaker, Session
 import uvicorn
 
-# Database setup
-SQLALCHEMY_DATABASE_URL = "sqlite:///./estoque.db"
-engine = create_engine(SQLALCHEMY_DATABASE_URL, connect_args={"check_same_thread": False})
+from urllib.parse import quote_plus
+
+password = quote_plus("MJs119629@03770")
+SQLALCHEMY_DATABASE_URL = f'mysql+pymysql://mateusfinderbit:{password}@estoquesilkart.mysql.uhserver.com/estoquesilkart'
+
+
+engine = create_engine(SQLALCHEMY_DATABASE_URL)
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 Base = declarative_base()
 
@@ -29,8 +34,8 @@ app.add_middleware(
 class TintaDB(Base):
     __tablename__ = "tintas"
     id = Column(Integer, primary_key=True, index=True)
-    color = Column(String, index=True)
-    type = Column(String)
+    color = Column(String(255), index=True)
+    type = Column(String(255)) 
     productQty = Column(Integer)
     productQtyLitros = Column(Float)
     qtyMin = Column(Float, nullable=True)
@@ -38,7 +43,7 @@ class TintaDB(Base):
 class PapelDB(Base):
     __tablename__ = "papeis"
     id = Column(Integer, primary_key=True, index=True)
-    type = Column(String, index=True)
+    type = Column(String(255), index=True)
     qtyUnit = Column(Integer)
     qtyMetros = Column(Integer)
     qtyMin = Column(Float, nullable=True)
@@ -46,7 +51,7 @@ class PapelDB(Base):
 class TecidoDB(Base):
     __tablename__ = "tecidos"
     id = Column(Integer, primary_key=True, index=True)
-    type = Column(String, index=True)
+    type = Column(String(255), index=True)
     qtyMetros = Column(Float)
     width = Column(Float)
     qtyMin = Column(Float, nullable=True)
