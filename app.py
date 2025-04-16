@@ -4,15 +4,12 @@ from pydantic import BaseModel
 from typing import Optional
 from sqlalchemy import create_engine, Column, Integer, String, Float
 from sqlalchemy.orm import declarative_base
-
 from sqlalchemy.orm import sessionmaker, Session
 import uvicorn
-
 from urllib.parse import quote_plus
 
 password = quote_plus("MJs119629@03770")
 SQLALCHEMY_DATABASE_URL = f'mysql+pymysql://mateusfinderbit:{password}@estoquesilkart.mysql.uhserver.com/estoquesilkart'
-
 
 engine = create_engine(SQLALCHEMY_DATABASE_URL)
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
@@ -21,12 +18,10 @@ Base = declarative_base()
 # FastAPI app
 app = FastAPI(title="Estoque API")
 
-
-
 # CORS middleware
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # Adjust for production (e.g., your frontend URL)
+    allow_origins=["*"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -107,7 +102,6 @@ def get_db():
 # Tinta endpoints
 @app.post("/products-tinta", response_model=TintaResponse, status_code=201)
 async def create_tinta(tinta: TintaCreate, db: Session = Depends(get_db)):
-    # Validate inputs
     if not tinta.color.strip():
         raise HTTPException(status_code=400, detail="Color is required")
     if not tinta.type.strip():
@@ -129,6 +123,24 @@ async def create_tinta(tinta: TintaCreate, db: Session = Depends(get_db)):
 async def get_tintas(db: Session = Depends(get_db)):
     return db.query(TintaDB).all()
 
+@app.get("/products-tinta/{id}", response_model=TintaResponse)
+async def get_tinta(id: int, db: Session = Depends(get_db)):
+    tinta = db.query(TintaDB).filter(TintaDB.id == id).first()
+    if not tinta:
+        raise HTTPException(status_code=404, detail="Tinta not found")
+    return tinta
+
+@app.put("/products-tinta/{id}", response_model=TintaResponse)
+async def update_tinta(id: int, tinta: TintaCreate, db: Session = Depends(get_db)):
+    db_tinta = db.query(TintaDB).filter(TintaDB.id == id).first()
+    if not db_tinta:
+        raise HTTPException(status_code=404, detail="Tinta not found")
+    for key, value in tinta.dict().items():
+        setattr(db_tinta, key, value)
+    db.commit()
+    db.refresh(db_tinta)
+    return db_tinta
+
 @app.delete("/products-tinta/{id}", status_code=204)
 async def delete_tinta(id: int, db: Session = Depends(get_db)):
     tinta = db.query(TintaDB).filter(TintaDB.id == id).first()
@@ -141,7 +153,6 @@ async def delete_tinta(id: int, db: Session = Depends(get_db)):
 # Papel endpoints
 @app.post("/products-papel", response_model=PapelResponse, status_code=201)
 async def create_papel(papel: PapelCreate, db: Session = Depends(get_db)):
-    # Validate inputs
     if not papel.type.strip():
         raise HTTPException(status_code=400, detail="Type is required")
     if papel.qtyUnit <= 0:
@@ -161,6 +172,24 @@ async def create_papel(papel: PapelCreate, db: Session = Depends(get_db)):
 async def get_papeis(db: Session = Depends(get_db)):
     return db.query(PapelDB).all()
 
+@app.get("/products-papel/{id}", response_model=PapelResponse)
+async def get_papel(id: int, db: Session = Depends(get_db)):
+    papel = db.query(PapelDB).filter(PapelDB.id == id).first()
+    if not papel:
+        raise HTTPException(status_code=404, detail="Papel not found")
+    return papel
+
+@app.put("/products-papel/{id}", response_model=PapelResponse)
+async def update_papel(id: int, papel: PapelCreate, db: Session = Depends(get_db)):
+    db_papel = db.query(PapelDB).filter(PapelDB.id == id).first()
+    if not db_papel:
+        raise HTTPException(status_code=404, detail="Papel not found")
+    for key, value in papel.dict().items():
+        setattr(db_papel, key, value)
+    db.commit()
+    db.refresh(db_papel)
+    return db_papel
+
 @app.delete("/products-papel/{id}", status_code=204)
 async def delete_papel(id: int, db: Session = Depends(get_db)):
     papel = db.query(PapelDB).filter(PapelDB.id == id).first()
@@ -173,7 +202,6 @@ async def delete_papel(id: int, db: Session = Depends(get_db)):
 # Tecido endpoints
 @app.post("/products-tecido", response_model=TecidoResponse, status_code=201)
 async def create_tecido(tecido: TecidoCreate, db: Session = Depends(get_db)):
-    # Validate inputs
     if not tecido.type.strip():
         raise HTTPException(status_code=400, detail="Type is required")
     if tecido.qtyMetros <= 0:
@@ -192,6 +220,24 @@ async def create_tecido(tecido: TecidoCreate, db: Session = Depends(get_db)):
 @app.get("/products-tecido", response_model=list[TecidoResponse])
 async def get_tecidos(db: Session = Depends(get_db)):
     return db.query(TecidoDB).all()
+
+@app.get("/products-tecido/{id}", response_model=TecidoResponse)
+async def get_tecido(id: int, db: Session = Depends(get_db)):
+    tecido = db.query(TecidoDB).filter(TecidoDB.id == id).first()
+    if not tecido:
+        raise HTTPException(status_code=404, detail="Tecido not found")
+    return tecido
+
+@app.put("/products-tecido/{id}", response_model=TecidoResponse)
+async def update_tecido(id: int, tecido: TecidoCreate, db: Session = Depends(get_db)):
+    db_tecido = db.query(TecidoDB).filter(TecidoDB.id == id).first()
+    if not db_tecido:
+        raise HTTPException(status_code=404, detail="Tecido not found")
+    for key, value in tecido.dict().items():
+        setattr(db_tecido, key, value)
+    db.commit()
+    db.refresh(db_tecido)
+    return db_tecido
 
 @app.delete("/products-tecido/{id}", status_code=204)
 async def delete_tecido(id: int, db: Session = Depends(get_db)):
