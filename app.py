@@ -53,6 +53,14 @@ class TecidoDB(Base):
     width = Column(Float)
     qtyMin = Column(Float, nullable=True)
 
+class TecidoCortadoDB(Base):
+    __tablename__ = "tecidos_cortados"
+    id = Column(Integer, primary_key=True, index=True)
+    type = Column(String(255), index=True)  # "malha" ou "tactel"
+    quantity = Column(Integer)
+    measurement = Column(String(50))  # Formato "larguraxaltura", ex.: "160x100"
+    qtyMin = Column(Float, nullable=True)
+
 # Create tables
 Base.metadata.create_all(bind=engine)
 
@@ -76,6 +84,12 @@ class TecidoCreate(BaseModel):
     width: float
     qtyMin: Optional[float] = 0
 
+class TecidoCortadoCreate(BaseModel):
+    type: str
+    quantity: int
+    measurement: str
+    qtyMin: Optional[float] = 0
+
 class TintaResponse(TintaCreate):
     id: int
     class Config:
@@ -87,6 +101,11 @@ class PapelResponse(PapelCreate):
         orm_mode = True
 
 class TecidoResponse(TecidoCreate):
+    id: int
+    class Config:
+        orm_mode = True
+
+class TecidoCortadoResponse(TecidoCortadoCreate):
     id: int
     class Config:
         orm_mode = True
@@ -245,6 +264,84 @@ async def delete_tecido(id: int, db: Session = Depends(get_db)):
     if not tecido:
         raise HTTPException(status_code=404, detail="Tecido not found")
     db.delete(tecido)
+    db.commit()
+    return None
+
+# Tecido Cortado endpoints
+@app.post("/products-tecido-cortado", response_model=TecidoCortadoResponse, status_code=201)
+async def create_tecido_cortado(tecido_cortado: TecidoCortadoCreate, db: Session = Depends(get_db)):
+    if not tecido_cortado.type.strip():
+        raise HTTPException(status_code=400, detail="Type is required")
+    if tecido_cortado.type.lower() not in ["malha", "tactel"]:
+        raise HTTPException(status_code=400, detail="Type must be 'malha' or 'tactel'")
+    if tecido_cortado.quantity <= 0:
+        raise HTTPException(status_code=400, detail="quantity must be positive")
+    if not tecido_cortado.measurement.strip():
+        raise HTTPException(status_code=400, detail="measurement is required")
+    if not tecido_cortado.measurement.count('x') == 1:
+        raise HTTPException(status_code=400, detail="measurement must be in format 'widthxheight'")
+    try:
+        width, height = map(float, tecido_cortado.measurement.split('x'))
+        if width <= 0 or height <= 0:
+            raise HTTPException(status_code=400, detail="width and height must be positive")
+    except ValueError:
+        raise HTTPException(status_code=400, detail="measurement must be in format 'widthxheight' with numeric values")
+    if tecido_cortado.qtyMin < 0:
+        raise HTTPException(status_code=400, detail="qtyMin cannot be negative")
+
+    db_tecido_cortado = TecidoCortadoDB(**tecido_cortado.dict())
+    db.add(db_tecido_cortado)
+    db.commit()
+    db.refresh(db_tecido_cortado)
+    return db_tecido_cortado
+
+@app.get("/products-tecido-cortado", response_model=list[TecidoCortadoResponse])
+async def get_tecidos_cortados(db: Session = Depends(get_db)):
+    return db.query(TecidoCortadoDB).all()
+
+@app.get("/products-tecido-cortado/{id}", response_model=TecidoCortadoResponse)
+async def get_tecido_cortado(id: int, db: Session = Depends(get_db)):
+    tecido_cortado = db.query(TecidoCortadoDB).filter(TecidoCortadoDB.id == id).first()
+    if not tecido_cortado:
+        raise HTTPException(status_code=404, detail="Tecido Cortado not found")
+    return tecido_cortado
+
+@app.put("/products-tecido-cortado/{id}", response_model=TecidoCortadoResponse)
+async def update_tecido_cortado(id: int, tecido_cortado: TecidoCortadoCreate, db: Session = Depends(get_db)):
+    db_tecido_cortado = db.query(TecidoCortadoDB).filter(TecidoCortadoDB.id == id).first()
+    if not db_tecido_cortado:
+        raise HTTPException(status_code=404, detail="Tecido Cortado not found")
+    if not tecido_cortado.type.strip():
+        raise HTTPException(status_code=400, detail="Type is required")
+    if tecido_cortado.type.lower() not in ["malha", "tactel"]:
+        raise HTTPException(status_code=400, detail="Type must be 'malha' or 'tactel'")
+    if tecido_cortado.quantity <= 0:
+        raise HTTPException(status_code=400, detail="quantity must be positive")
+    if not tecido_cortado.measurement.strip():
+        raise HTTPException(status_code=400, detail="measurement is required")
+    if not tecido_cortado.measurement.count('x') == 1:
+        raise HTTPException(status_code=400, detail="measurement must be in format 'widthxheight'")
+    try:
+        width, height = map(float, tecido_cortado.measurement.split('x'))
+        if width <= 0 or height <= 0:
+            raise HTTPException(status_code=400, detail="width and height must be positive")
+    except ValueError:
+        raise HTTPException(status_code=400, detail="measurement must be in format 'widthxheight' with numeric values")
+    if tecido_cortado.qtyMin < 0:
+        raise HTTPException(status_code=400, detail="qtyMin cannot be negative")
+
+    for key, value in tecido_cortado.dict().items():
+        setattr(db_tecido_cortado, key, value)
+    db.commit()
+    db.refresh(db_tecido_cortado)
+    return db_tecido_cortado
+
+@app.delete("/products-tecido-cortado/{id}", status_code=204)
+async def delete_tecido_cortado(id: int, db: Session = Depends(get_db)):
+    tecido_cortado = db.query(TecidoCortadoDB).filter(TecidoCortadoDB.id == id).first()
+    if not tecido_cortado:
+        raise HTTPException(status_code=404, detail="Tecido Cortado not found")
+    db.delete(tecido_cortado)
     db.commit()
     return None
 
