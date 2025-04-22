@@ -2,11 +2,12 @@ from fastapi import FastAPI, HTTPException, Depends
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from typing import Optional
-from sqlalchemy import create_engine, Column, Integer, String, Float
+from sqlalchemy import create_engine, Column, Integer, String, Float, ForeignKey, DateTime
 from sqlalchemy.orm import declarative_base
 from sqlalchemy.orm import sessionmaker, Session
 import uvicorn
 from urllib.parse import quote_plus
+from datetime import datetime
 
 password = quote_plus("MJs119629@03770")
 SQLALCHEMY_DATABASE_URL = f'mysql+pymysql://mateusfinderbit:{password}@estoquesilkart.mysql.uhserver.com/estoquesilkart'
@@ -32,7 +33,7 @@ class TintaDB(Base):
     __tablename__ = "tintas"
     id = Column(Integer, primary_key=True, index=True)
     color = Column(String(255), index=True)
-    type = Column(String(255)) 
+    type = Column(String(255))
     productQty = Column(Integer)
     productQtyLitros = Column(Float)
     qtyMin = Column(Float, nullable=True)
@@ -56,10 +57,34 @@ class TecidoDB(Base):
 class TecidoCortadoDB(Base):
     __tablename__ = "tecidos_cortados"
     id = Column(Integer, primary_key=True, index=True)
-    type = Column(String(255), index=True)  # "malha" ou "tactel"
+    type = Column(String(255), index=True)
     quantity = Column(Integer)
-    measurement = Column(String(50))  # Formato "larguraxaltura", ex.: "160x100"
+    measurement = Column(String(50))
     qtyMin = Column(Float, nullable=True)
+
+class SupplierDB(Base):
+    __tablename__ = "suppliers"
+    id = Column(Integer, primary_key=True, index=True)
+    name = Column(String(255), index=True)
+    phone = Column(String(50))
+    email = Column(String(255))
+
+class EntryDB(Base):
+    __tablename__ = "entries"
+    id = Column(Integer, primary_key=True, index=True)
+    category = Column(String(50))  # "tinta", "papel", "tecido", "tecido-cortado"
+    product_id = Column(Integer, index=True)
+    quantity = Column(Float)
+    supplier_id = Column(Integer, ForeignKey("suppliers.id"))
+    date = Column(DateTime, default=datetime.utcnow)
+
+class ExitDB(Base):
+    __tablename__ = "exits"
+    id = Column(Integer, primary_key=True, index=True)
+    category = Column(String(50))  # "tinta", "papel", "tecido", "tecido-cortado"
+    product_id = Column(Integer, index=True)
+    quantity = Column(Float)
+    date = Column(DateTime, default=datetime.utcnow)
 
 # Create tables
 Base.metadata.create_all(bind=engine)
@@ -90,6 +115,22 @@ class TecidoCortadoCreate(BaseModel):
     measurement: str
     qtyMin: Optional[float] = 0
 
+class SupplierCreate(BaseModel):
+    name: str
+    phone: str
+    email: str
+
+class EntryCreate(BaseModel):
+    category: str
+    product_id: int
+    quantity: float
+    supplier_id: int
+
+class ExitCreate(BaseModel):
+    category: str
+    product_id: int
+    quantity: float
+
 class TintaResponse(TintaCreate):
     id: int
     class Config:
@@ -110,6 +151,23 @@ class TecidoCortadoResponse(TecidoCortadoCreate):
     class Config:
         orm_mode = True
 
+class SupplierResponse(SupplierCreate):
+    id: int
+    class Config:
+        orm_mode = True
+
+class EntryResponse(EntryCreate):
+    id: int
+    date: datetime
+    class Config:
+        orm_mode = True
+
+class ExitResponse(ExitCreate):
+    id: int
+    date: datetime
+    class Config:
+        orm_mode = True
+
 # Dependency for database session
 def get_db():
     db = SessionLocal()
@@ -117,6 +175,52 @@ def get_db():
         yield db
     finally:
         db.close()
+
+# Helper function to update stock
+async def update_stock(db: Session, category: str, product_id: int, quantity: float, is_entry: bool):
+    if category == "tinta":
+        product = db.query(TintaDB).filter(TintaDB.id == product_id).first()
+        if not product:
+            raise HTTPException(status_code=404, detail="Tinta not found")
+        if is_entry:
+            product.productQty += int(quantity)
+        else:
+            if product.productQty < quantity:
+                raise HTTPException(status_code=400, detail="Insufficient stock for tinta")
+            product.productQty -= int(quantity)
+    elif category == "papel":
+        product = db.query(PapelDB).filter(PapelDB.id == product_id).first()
+        if not product:
+            raise HTTPException(status_code=404, detail="Papel not found")
+        if is_entry:
+            product.qtyUnit += int(quantity)
+        else:
+            if product.qtyUnit < quantity:
+                raise HTTPException(status_code=400, detail="Insufficient stock for papel")
+            product.qtyUnit -= int(quantity)
+    elif category == "tecido":
+        product = db.query(TecidoDB).filter(TecidoDB.id == product_id).first()
+        if not product:
+            raise HTTPException(status_code=404, detail="Tecido not found")
+        if is_entry:
+            product.qtyMetros += quantity
+        else:
+            if product.qtyMetros < quantity:
+                raise HTTPException(status_code=400, detail="Insufficient stock for tecido")
+            product.qtyMetros -= quantity
+    elif category == "tecido-cortado":
+        product = db.query(TecidoCortadoDB).filter(TecidoCortadoDB.id == product_id).first()
+        if not product:
+            raise HTTPException(status_code=404, detail="Tecido Cortado not found")
+        if is_entry:
+            product.quantity += int(quantity)
+        else:
+            if product.quantity < quantity:
+                raise HTTPException(status_code=400, detail="Insufficient stock for tecido cortado")
+            product.quantity -= int(quantity)
+    else:
+        raise HTTPException(status_code=400, detail="Invalid category")
+    db.commit()
 
 # Tinta endpoints
 @app.post("/products-tinta", response_model=TintaResponse, status_code=201)
@@ -344,6 +448,74 @@ async def delete_tecido_cortado(id: int, db: Session = Depends(get_db)):
     db.delete(tecido_cortado)
     db.commit()
     return None
+
+# Supplier endpoints
+@app.post("/suppliers", response_model=SupplierResponse, status_code=201)
+async def create_supplier(supplier: SupplierCreate, db: Session = Depends(get_db)):
+    if not supplier.name.strip():
+        raise HTTPException(status_code=400, detail="Name is required")
+    if not supplier.phone.strip():
+        raise HTTPException(status_code=400, detail="Phone is required")
+    if not supplier.email.strip():
+        raise HTTPException(status_code=400, detail="Email is required")
+
+    db_supplier = SupplierDB(**supplier.dict())
+    db.add(db_supplier)
+    db.commit()
+    db.refresh(db_supplier)
+    return db_supplier
+
+@app.get("/suppliers", response_model=list[SupplierResponse])
+async def get_suppliers(db: Session = Depends(get_db)):
+    return db.query(SupplierDB).all()
+
+@app.delete("/suppliers/{id}", status_code=204)
+async def delete_supplier(id: int, db: Session = Depends(get_db)):
+    supplier = db.query(SupplierDB).filter(SupplierDB.id == id).first()
+    if not supplier:
+        raise HTTPException(status_code=404, detail="Supplier not found")
+    db.delete(supplier)
+    db.commit()
+    return None
+
+# Entry endpoints
+@app.post("/entries", response_model=EntryResponse, status_code=201)
+async def create_entry(entry: EntryCreate, db: Session = Depends(get_db)):
+    if entry.category not in ["tinta", "papel", "tecido", "tecido-cortado"]:
+        raise HTTPException(status_code=400, detail="Invalid category")
+    if entry.quantity <= 0:
+        raise HTTPException(status_code=400, detail="Quantity must be positive")
+    supplier = db.query(SupplierDB).filter(SupplierDB.id == entry.supplier_id).first()
+    if not supplier:
+        raise HTTPException(status_code=404, detail="Supplier not found")
+
+    # Update stock
+    await update_stock(db, entry.category, entry.product_id, entry.quantity, is_entry=True)
+
+    # Record entry
+    db_entry = EntryDB(**entry.dict())
+    db.add(db_entry)
+    db.commit()
+    db.refresh(db_entry)
+    return db_entry
+
+# Exit endpoints
+@app.post("/exits", response_model=ExitResponse, status_code=201)
+async def create_exit(exit: ExitCreate, db: Session = Depends(get_db)):
+    if exit.category not in ["tinta", "papel", "tecido", "tecido-cortado"]:
+        raise HTTPException(status_code=400, detail="Invalid category")
+    if exit.quantity <= 0:
+        raise HTTPException(status_code=400, detail="Quantity must be positive")
+
+    # Update stock
+    await update_stock(db, exit.category, exit.product_id, exit.quantity, is_entry=False)
+
+    # Record exit
+    db_exit = ExitDB(**exit.dict())
+    db.add(db_exit)
+    db.commit()
+    db.refresh(db_exit)
+    return db_exit
 
 if __name__ == "__main__":
     uvicorn.run(app, host="0.0.0.0", port=8000)
